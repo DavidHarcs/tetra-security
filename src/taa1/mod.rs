@@ -211,6 +211,29 @@ pub fn tb5(ck: &[u8; 10], cn: u16, la: u16, cc: u8) -> [u8; 10] {
     out
 }
 
+/// TB7 (clause 5.x): expand the 96-bit GSKO into the 128-bit EGSKO used as the
+/// key for sealing GCKs with TA81. Each 3-byte group is followed by its XOR.
+pub fn tb7(gsko: &[u8; 12]) -> [u8; 16] {
+    [
+        gsko[0],
+        gsko[1],
+        gsko[2],
+        gsko[0] ^ gsko[1] ^ gsko[2],
+        gsko[3],
+        gsko[4],
+        gsko[5],
+        gsko[3] ^ gsko[4] ^ gsko[5],
+        gsko[6],
+        gsko[7],
+        gsko[8],
+        gsko[6] ^ gsko[7] ^ gsko[8],
+        gsko[9],
+        gsko[10],
+        gsko[11],
+        gsko[9] ^ gsko[10] ^ gsko[11],
+    ]
+}
+
 /// TA61 (clause 5.12): the encrypted short identity ESI from a cipher key
 /// (SCK in class 2, CCK in class 3) and a 24-bit SSI. The key both drives
 /// HURDLE-II (expanded with EXP4) and, shrunk to 64 bits, is its data input;
@@ -368,6 +391,24 @@ mod tests {
             let r = ta12(&h(ks), &h(rand));
             assert_eq!(r.res, h::<4>(res));
             assert_eq!(r.dck, h::<10>(dck));
+        }
+    }
+
+    #[test]
+    fn tb7_matches_reference_vectors() {
+        // Midnight Blue TETRA_crypto (Apache-2.0): (GSKO[12], EGSKO[16]).
+        let vectors: [([u8; 12], [u8; 16]); 2] = [
+            (
+                [0x01, 0x23, 0x45, 0x67, 0x89, 0xAB, 0xCD, 0xEF, 0xAA, 0xBB, 0x02, 0xBC],
+                [0x01, 0x23, 0x45, 0x67, 0x67, 0x89, 0xAB, 0x45, 0xCD, 0xEF, 0xAA, 0x88, 0xBB, 0x02, 0xBC, 0x05],
+            ),
+            (
+                [0xBD, 0xF8, 0xE8, 0xD4, 0x7C, 0xA2, 0xED, 0xAE, 0x0C, 0xFB, 0x0D, 0xE8],
+                [0xBD, 0xF8, 0xE8, 0xAD, 0xD4, 0x7C, 0xA2, 0x0A, 0xED, 0xAE, 0x0C, 0x4F, 0xFB, 0x0D, 0xE8, 0x1E],
+            ),
+        ];
+        for (gsko, egsko) in vectors {
+            assert_eq!(tb7(&gsko), egsko);
         }
     }
 
