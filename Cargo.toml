@@ -1,0 +1,19 @@
+[package]
+name = "tetra-security"
+version = "0.1.0"
+edition = "2021"
+rust-version = "1.96"
+description = "TETRA air-interface security: TAA1 authentication and key management, TEA key stream generators (ETSI EN 300 392-7, TS 104 053)"
+authors = ["David Harcus MM7FDM <david@donhostmedia.uk>"]
+license = "Apache-2.0"
+repository = "https://github.com/DavidHarcs/tetra-security"
+keywords = ["tetra", "crypto", "tea", "taa1", "otar"]
+categories = ["cryptography"]
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+rand = "0.9"
+zeroize = { version = "1.8", features = ["derive"] }
+
+[dev-dependencies]
+hex = "0.4"
