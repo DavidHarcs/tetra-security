@@ -18,7 +18,9 @@
 pub mod hurdle;
 
 pub mod otar;
-pub use otar::{SSCK_LEN, ta51, ta52};
+pub use otar::{
+    SGCK_LEN, SGSKO_LEN, SSCK_LEN, ta51, ta52, ta81, ta82, ta91, ta92,
+};
 
 use hurdle::Hurdle;
 

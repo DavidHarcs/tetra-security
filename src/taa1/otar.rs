@@ -177,6 +177,33 @@ pub fn ta82(sgck: &[u8; SGCK_LEN], gck_vn: u16, key: &[u8; 16]) -> Result<([u8; 
     Ok((gck, gckn))
 }
 
+/// Sealed GSKO, 120 bits (same size and construction as a sealed GCK).
+pub const SGSKO_LEN: usize = SGCK_LEN;
+
+/// TA91: seal a 96-bit group session key for OTAR (`gsko`, version `gsko_vn`)
+/// under the sealing key `key` (= TA41(K, RSO) for individual delivery). The
+/// GSKO carries the OTAR key-encryption key used to then distribute GCKs in
+/// group mode. ETSI TS 104 053-3.
+///
+/// TA91 is TA81 applied to the GSKO split as a 10-byte value plus its trailing
+/// 2 bytes in the GCKN redundancy slot, so the sealed output is a sealed GCK.
+pub fn ta91(gsko: &[u8; 12], gsko_vn: u16, key: &[u8; 16]) -> [u8; SGSKO_LEN] {
+    let gck: [u8; 10] = gsko[..10].try_into().expect("10 bytes");
+    let gckn = [gsko[10], gsko[11]];
+    ta81(&gck, gsko_vn, &gckn, key)
+}
+
+/// TA92: unseal a sealed GSKO. `Ok(gsko)` (12 bytes) when the redundancy checks
+/// out, `Err(())` when the manipulation flag is set (wrong key, wrong version,
+/// or a corrupted key).
+pub fn ta92(sgsko: &[u8; SGSKO_LEN], gsko_vn: u16, key: &[u8; 16]) -> Result<[u8; 12], ()> {
+    let (gck, tail) = ta82(sgsko, gsko_vn, key)?;
+    let mut gsko = [0u8; 12];
+    gsko[..10].copy_from_slice(&gck);
+    gsko[10..].copy_from_slice(&tail);
+    Ok(gsko)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -288,6 +315,53 @@ mod tests {
             bad[9] ^= 0x01;
             assert!(ta52(&bad, &kso, vn).is_err());
         }
+    }
+
+    // GSKO reference vectors (Midnight Blue TETRA_crypto, Apache-2.0):
+    // (GSKO, GSKO-VN, key, sealed GSKO).
+    type GskoVector = ([u8; 12], u16, [u8; 16], [u8; 15]);
+    const GSKO_VECTORS: [GskoVector; 4] = [
+        (
+            [0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0xb0, 0xdc],
+            0xa397,
+            [0x63, 0x59, 0x38, 0xac, 0xe8, 0x1f, 0x6b, 0x67, 0x82, 0xa6, 0xfa, 0x46, 0xae, 0x4f, 0x7f, 0x69],
+            [0x1c, 0xcf, 0x9c, 0x6b, 0xa8, 0x5c, 0x5b, 0xc7, 0xe0, 0x7b, 0x04, 0x21, 0xf2, 0xc3, 0x8a],
+        ),
+        (
+            [0x63, 0x09, 0x5a, 0xeb, 0x26, 0xf0, 0xe7, 0x26, 0x28, 0xd0, 0x59, 0x05],
+            0x8fbc,
+            [0x55, 0x36, 0xeb, 0x46, 0xa6, 0x02, 0xe7, 0x80, 0x49, 0x29, 0x9d, 0x82, 0xab, 0x64, 0x80, 0x45],
+            [0xc9, 0x35, 0x95, 0xa5, 0x4e, 0xcd, 0x34, 0x16, 0x13, 0xd0, 0xcf, 0x87, 0x03, 0xeb, 0xac],
+        ),
+        (
+            [0x10, 0x6a, 0x40, 0xc6, 0xf7, 0xb0, 0x89, 0xb7, 0xac, 0x41, 0xe5, 0xb4],
+            0xbec4,
+            [0x08, 0xf6, 0x17, 0x4e, 0xc8, 0x18, 0xd2, 0xa2, 0x14, 0xf1, 0xd7, 0x53, 0x4d, 0x31, 0x9f, 0x6c],
+            [0x03, 0x52, 0x0f, 0xe9, 0x75, 0x7b, 0x66, 0x9d, 0x93, 0xf6, 0x57, 0x5f, 0xee, 0x6f, 0x9c],
+        ),
+        (
+            [0xc3, 0xc6, 0x82, 0xda, 0xd8, 0xaa, 0x33, 0xa2, 0xce, 0x6b, 0x7e, 0x93],
+            0x1f8b,
+            [0xc2, 0x71, 0x13, 0x63, 0xd3, 0x6d, 0x4f, 0xbf, 0xc9, 0xf5, 0xcf, 0x73, 0xb8, 0xb4, 0xdd, 0x35],
+            [0xc8, 0x6a, 0x1d, 0x03, 0x2c, 0x97, 0xbb, 0x94, 0xb0, 0x01, 0x8f, 0xe5, 0x50, 0x7b, 0xa7],
+        ),
+    ];
+
+    #[test]
+    fn ta91_matches_reference_vectors_and_ta92_inverts() {
+        for (gsko, vn, key, sealed) in GSKO_VECTORS {
+            assert_eq!(ta91(&gsko, vn, &key), sealed, "TA91 sealed GSKO mismatch");
+            assert_eq!(ta92(&sealed, vn, &key), Ok(gsko), "TA92 should recover the GSKO");
+        }
+    }
+
+    #[test]
+    fn ta92_flags_a_wrong_key_or_version() {
+        let (gsko, vn, mut key, _) = GSKO_VECTORS[2];
+        let sealed = ta91(&gsko, vn, &key);
+        assert!(ta92(&sealed, vn ^ 1, &key).is_err(), "wrong version must flag");
+        key[7] ^= 0x40;
+        assert!(ta92(&sealed, vn, &key).is_err(), "wrong key must flag");
     }
 
     #[test]
